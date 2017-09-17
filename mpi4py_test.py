@@ -5,7 +5,7 @@ sudo yum install -y mpich2 mpich2-devel mpich2-autoload mpich2-doc
 #  sudo yum -y install openmpi openmpi-devel
 pip install mpi4py
 
-$ mpirun -np 4 python mpi4py_test.py
+$ mpiexec -n 4 python mpi4py_test.py
 """
 
 import os
@@ -14,6 +14,7 @@ from torch import Tensor
 import numpy as np
 import mpi4py
 import time
+from pprint import pprint
 from mpi4py import MPI
 import numpy.linalg as LA
 
@@ -26,34 +27,29 @@ print(f"rank = {rank}")
 num_messages = 10
 n = 10
 np.random.seed(42)
-sizes = np.random.choice(n, size=num_messages) + 1
-sizes = np.ones(num_messages, dtype=int) * 300
-print("messages are sized", sizes)
+messages = [{'size': np.random.choice(n) + 1,
+             'tag': i} for i in range(num_messages)]
 
-blocking = True
-send_seq = {i: np.ones(size, dtype=np.float32) * i
-            for i, size in enumerate(sizes)}
 if rank == 0:
-    for i, send in send_seq.items():
-        mpi_torch.isend(send, tag=i, dest=1-rank, blocking=blocking)
+    for i, message in enumerate(messages):
+        messages[i]['data'] = np.ones(message['size'], dtype='float32')
+        messages[i]['data'] *= message['tag']
+
+    for i, message in enumerate(messages):
+        mpi_torch.isend(messages[i]['data'], tag=message['tag'],
+                        dest=1-rank)
 
 elif rank == 1:
-    recv_seq = {i: np.empty(size, dtype=np.float32)
-                for i, size in enumerate(sizes)}
-    requests = []
-    for i in recv_seq:
-        requests += [mpi_torch.irecv(recv_seq[i], tag=i, source=1-rank, blocking=blocking)]
+    for i, message in enumerate(messages):
+        messages[i]['data'] = np.empty(message['size'], dtype='float32')
 
-    #  for r in requests:
-        #  r.Wait()
-    #  mpi_torch.wait(requests)
-    time.sleep(2.5)
+    requests = [mpi_torch.irecv(messages[i]['data'], tag=message['tag'],
+                                source=1-rank)
+                for i, message in enumerate(messages)]
 
-    for (sent_i, sent), (recv_i, recv) in zip(send_seq.items(), recv_seq.items()):
-        #  sent = sent.numpy()
-        #  rel_error = LA.norm(sent - recv) / (LA.norm(recv) + 1e-8)
-        #  error = np.abs(sent - recv)
-        print("-"*40)
-        print(f"sent_i = {sent_i}, recv_i = {recv_i}")
-        print(f"sent.mean = {sent.mean()}, recv.mean = {recv.mean()}")
-        #  assert np.allclose(sent, recv)
+    mpi_torch.wait(requests)
+
+    for message in messages:
+        show = {k: v for k, v in message.items() if k != 'data'}
+        show['data_mean'] = message['data'].mean()
+        pprint(show)
