@@ -1,8 +1,14 @@
 
-It looks like I should be using Amazon EC2 private IPs: https://github.com/hwang595/pytorch_distributed_nn/blob/41be7dfc6719d2b4c9c1216035cd0126cf7dcecd/tools/hosts
+## Setup
+* Local machine:
+  * copy Amazon EC2 key files (e.g., `scott-key-dim.pem`) to this folder
+  * include hosts files with private IPs in this directory (e.g., `hosts_file`)
+  * use `scp.py` to move this folder to EC2 domains
+* On every remote machine:
+  * run `sudo bash main.sh`
+  * To run MPI programs, use `mpiexec -n 3 -f hosts_file python my_script.py`
 
-I think Hongwai uses a tensorflow startup script for different EC2 machines? https://github.com/hwang595/pytorch_distributed_nn/blob/41be7dfc6719d2b4c9c1216035cd0126cf7dcecd/tools/pytorch_ec2.py#L934
-
-This sets up a cluster with NFS. Take part of this?
-
-Look at his tests to see how he runs.
+## Notes
+* Can SSH with private IPs (e.g., `ssh ec2-user@172.31.19.203` works).
+* Useful wiki post on getting passwordless SSH setup
+    * https://wiki.mpich.org/mpich/index.php/Using_MPICH_in_Amazon_EC2
