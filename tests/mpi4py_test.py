@@ -1,10 +1,15 @@
 from mpi4py import MPI
 import numpy
+import subprocess
+
+def _run(cmd):
+    return subprocess.check_output(cmd.split(' '))
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 size = comm.Get_size()
 
+print(_run('uname -n'))
 print(rank, size)
 # passing MPI datatypes explicitly
 #  if rank == 0:
