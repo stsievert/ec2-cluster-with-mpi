@@ -38,9 +38,13 @@ class EC2:
         elif instance_type == 'spot-instance':
             count = kwargs.pop('MinCount')
             kwargs.pop('MaxCount')
-            r = client.request_spot_instances(InstanceCount=count,
-                                              LaunchSpecification=kwargs,
-                                              SpotPrice=self.cfg["spot_price"])
+            spot_kwargs = {'InstanceCount': count,
+                           'LaunchSpecification': kwargs,
+                           'SpotPrice': self.cfg['spot_price']}
+            if 'block-duration-minutes' in self.cfg['cluster'].keys():
+                spot_kwargs['BlockDurationMinutes'] = self.cfg['cluster']['block-duration-minutes']
+                print('Requestion block...')
+            r = client.request_spot_instances(**spot_kwargs)
         else:
             msg = 'cfg["instance_type"]=={instance_type} not one in {types]'
             raise ValueError(msg.format(types=['dedicated', 'spot-instance'],
@@ -61,16 +65,16 @@ class EC2:
         with open(filename, 'w') as f:
             print('\n'.join(ips), file=f)
 
-    #  def scp_up(self, files='../WideResNet-pytorch/*.py ../WideResnet-pytorch/comms/*.py hosts ../WideResNet-pytorch/tools/run.py',
     def scp_up(self, files='../WideResNet-pytorch/* hosts',
                out='WideResNet-pytorch', flags=''):
         instances = self._get_cluster()
         ips = [instance.classic_address.public_ip for instance in instances]
-        cmd = 'scp -i {key} {flags} {files} ec2-user@{ip}:~/{out}'
-        for ip in ips:
-            run = cmd.format(key=self.cfg['key_file'], files=files,
-                             ip=ip, out=out, flags=flags)
-            os.system(run)
+        cmd = ('scp -o StrictHostKeyChecking=no -i {key} {flags} {files} '
+               'ec2-user@{ip}:~/{out}')
+        cmds = [cmd.format(key=self.cfg['key_file'], files=files, ip=ip,
+                           out=out, flags=flags)
+                  for ip in ips]
+        Parallel(n_jobs=len(cmds))(delayed(os.system)(run) for run in cmds)
 
     def run_cluster_ssh_command(self, cmd):
         instances = self._get_cluster()
@@ -104,7 +108,7 @@ class EC2:
             client.terminate_instances(InstanceIds=ids)
 
 
-cfg = {'region': 'us-west-2', 'availability_zone': 'us-west-2b',
+cfg = {'region': 'us-west-2', 'availability_zone': 'us-west-2c',
        'ami': 'ami-ceb545b6',
        #  'security_groups': ['sg-2d241757',  # Jupyter notebooks
                            #  'sg-f2937f8f',  # jupyter + ssh + ports{3141,6282}
@@ -115,12 +119,16 @@ cfg = {'region': 'us-west-2', 'availability_zone': 'us-west-2b',
                            'MPI1',
                            'MPI2'],
        'instance_type': 'spot-instance',
-       'spot_price': '0.62',  # must be a str
+       'spot_price': '1.50',  # must be a str
+       #  'instance_type': 'dedicated',
        'key_name': 'scott-key-dim',
        'key_file': '/Users/scott/Work/Developer/AWS/scott-key-dim.pem',
-       'cluster': {'count': 1, 'instance_type': 'p2.xlarge',
-                   'name': 'scott-compress'},
+       'cluster': {'count': 2, 'instance_type': 'p2.xlarge',
+                   'name': 'scott-compress',
+                   #  'block-duration-minutes': 360},
+                   }
        }
+
 client = boto3.client("ec2", region_name=cfg['region'])
 ec2 = boto3.resource("ec2", region_name=cfg['region'])
 
@@ -128,7 +136,7 @@ if __name__ == "__main__":
     # python launch.py --seed=42 --layers=62 --compress=1
     cloud = EC2(cfg)
     if len(sys.argv) < 2:
-        print('Usage: python launch.py command [custom_cluster_command]')
+        print('Usage: python {} command [custom_cluster_command]'.format(sys.argv[0]))
         sys.exit(1)
     command = sys.argv[1]
     if command == 'launch':
@@ -139,24 +147,45 @@ if __name__ == "__main__":
         cloud.write_public_dnss('DNSs')
         cloud.write_private_ips('hosts')
         cloud.scp_up()
+        cloud.run_cluster_ssh_command('pip install --upgrade distributed')
+        cloud.run_cluster_ssh_command('conda install -y -c anaconda python-blosc')
+        cloud.run_cluster_ssh_command('conda install -y pytorch torchvision -c pytorch')
         cloud.scp_up(files='./setup_scripts/', out='', flags='-r')
         cloud.run_cluster_ssh_command('cd setup_scripts; bash main.sh')
         cloud.run_cluster_ssh_command('ssh-keyscan -f ~/WideResNet-pytorch/hosts >> ~/.ssh/known_hosts')
     elif command in {'scp', 'scp_up'}:
         cloud.scp_up()
-        cloud.run_cluster_ssh_command('mkdir /home/ec2-user/WideResNet-pytorch/comms')
-        cloud.scp_up(files='../WideResNet-pytorch/comms/*.py',
-                     out='WideResNet-pytorch/comms/')
+        cloud.run_cluster_ssh_command('mkdir /home/ec2-user/WideResNet-pytorch/pytorch_ps_mpi')
+        cloud.scp_up(files='../WideResNet-pytorch/pytorch_ps_mpi/*.py',
+                     out='WideResNet-pytorch/pytorch_ps_mpi/')
     elif command == 'debug':
         cloud.run_cluster_ssh_command('killall python')
         cloud.scp_up()
-        cloud.scp_up(files='../WideResNet-pytorch/comms/*.py',
-                     out='WideResNet-pytorch/comms/')
+        cloud.scp_up(files='../WideResNet-pytorch/pytorch_ps_mpi/*.py',
+                     out='WideResNet-pytorch/pytorch_ps_mpi/')
+    elif command == 'killall':
+        cloud.run_cluster_ssh_command('killall python')
     elif command in {'terminate', 'shutdown'}:
         cloud.terminate()
     elif command == 'custom':
         cmd = sys.argv[2]
         cloud.run_cluster_ssh_command(cmd)
+    elif command == 'write_DNSs':
+        cloud.write_public_dnss('DNSs')
+    elif command == 'dask_workers':
+        if len(sys.argv) != 3:
+            print('Usage: python cluster.py dask_workers ip')
+            sys.exit(1)
+        ip = sys.argv[2]
+        cloud.run_cluster_ssh_command('dask-worker --nprocs=1 --nthreads=1 '
+                                      f'{ip}:8786 > ~/WideResNet-pytorch/'
+                                      'dask.out 2>&1 &')
+    elif command == 'kill_dask_workers':
+        cloud.run_cluster_ssh_command('sudo killall python')
+        cloud.run_cluster_ssh_command('sudo killall dask-worker')
+    elif command == 'remove_output':
+        cloud.run_cluster_ssh_command('sudo rm -rf ~/output/*')
+        cloud.run_cluster_ssh_command('sudo rm -rf ~/WideResNet-pytorch/output/*')
     else:
         raise ValueError('Usage: python launch.py [command].\n'
                          '`command` not recognized.')
