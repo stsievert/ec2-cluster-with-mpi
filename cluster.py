@@ -31,7 +31,7 @@ class EC2:
                   'KeyName': self.cfg['key_name'],
                   'InstanceType': self.cfg['cluster']['instance_type'],
                   'ImageId': self.cfg['ami'],
-                  'Placement': {'AvailabilityZone': self.cfg['availability_zone']},
+                  #  'Placement': {'AvailabilityZone': self.cfg['availability_zone']},
                   'SecurityGroups': self.cfg['security_groups']}
         if instance_type == 'dedicated':
             r = client.run_instances(**kwargs)
@@ -108,7 +108,7 @@ class EC2:
             client.terminate_instances(InstanceIds=ids)
 
 
-cfg = {'region': 'us-west-2', 'availability_zone': 'us-west-2c',
+cfg = {'region': 'us-west-2',# 'availability_zone': 'us-west-2c',
        'ami': 'ami-ceb545b6',
        #  'security_groups': ['sg-2d241757',  # Jupyter notebooks
                            #  'sg-f2937f8f',  # jupyter + ssh + ports{3141,6282}
@@ -143,6 +143,9 @@ if __name__ == "__main__":
         cluster = cloud.launch()
         print("Lauched, now waiting to enter ssh-ready state...")
         #  cloud.wait_until_initialized()  # doesn't work
+    elif command == 'write':
+        cloud.write_public_dnss('DNSs')
+        cloud.write_private_ips('hosts')
     elif command == 'setup':
         cloud.write_public_dnss('DNSs')
         cloud.write_private_ips('hosts')
