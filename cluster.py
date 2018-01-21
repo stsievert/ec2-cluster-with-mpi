@@ -118,12 +118,12 @@ cfg = {'region': 'us-west-2',# 'availability_zone': 'us-west-2c',
                            'jupyter+ssh+ports{3141,6282}',
                            'MPI1',
                            'MPI2'],
-       'instance_type': 'spot-instance',
-       'spot_price': '1.50',  # must be a str
-       #  'instance_type': 'dedicated',
+       #  'instance_type': 'spot-instance',
+       #  'spot_price': '1.50',  # must be a str
+       'instance_type': 'dedicated',
        'key_name': 'scott-key-dim',
-       'key_file': '/Users/scott/Work/Developer/AWS/scott-key-dim.pem',
-       'cluster': {'count': 2, 'instance_type': 'p2.xlarge',
+       'key_file': '/Users/scott/Developer/AWS/scott-key-dim.pem',
+       'cluster': {'count': 2, 'instance_type': 'g2.2xlarge',
                    'name': 'scott-compress',
                    #  'block-duration-minutes': 360},
                    }
@@ -154,6 +154,9 @@ if __name__ == "__main__":
         cloud.run_cluster_ssh_command('conda install -y -c anaconda python-blosc')
         cloud.run_cluster_ssh_command('conda install -y pytorch torchvision -c pytorch')
         cloud.scp_up(files='./setup_scripts/', out='', flags='-r')
+        cloud.run_cluster_ssh_command('cd setup_scripts; bash main.sh')
+        cloud.run_cluster_ssh_command('ssh-keyscan -f ~/WideResNet-pytorch/hosts >> ~/.ssh/known_hosts')
+    elif command == 'ssh_setup':
         cloud.run_cluster_ssh_command('cd setup_scripts; bash main.sh')
         cloud.run_cluster_ssh_command('ssh-keyscan -f ~/WideResNet-pytorch/hosts >> ~/.ssh/known_hosts')
     elif command in {'scp', 'scp_up'}:
