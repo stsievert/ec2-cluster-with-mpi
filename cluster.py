@@ -70,7 +70,7 @@ class EC2:
         instances = self._get_cluster()
         ips = [instance.classic_address.public_ip for instance in instances]
         cmd = ('scp -o StrictHostKeyChecking=no -i {key} {flags} {files} '
-               'ec2-user@{ip}:~/{out}')
+               'ubuntu@{ip}:~/{out}')
         cmds = [cmd.format(key=self.cfg['key_file'], files=files, ip=ip,
                            out=out, flags=flags)
                   for ip in ips]
@@ -79,7 +79,7 @@ class EC2:
     def run_cluster_ssh_command(self, cmd):
         instances = self._get_cluster()
         ips = [instance.classic_address.public_ip for instance in instances]
-        to_run = 'ssh -i {keyfile} ec2-user@{ip} "{cmd}"'
+        to_run = 'ssh -i {keyfile} ubuntu@{ip} "{cmd}"'
 
         commands = [to_run.format(keyfile=self.cfg['key_file'], ip=ip, cmd=cmd)
                     for ip in ips]
@@ -92,7 +92,7 @@ class EC2:
         instances = self._get_cluster()
         ips = [instance.classic_address.public_ip for instance in instances]
         ip = ips[0]
-        to_run = 'ssh -i {keyfile} ec2-user@{ip} "{cmd}"'
+        to_run = 'ssh -i {keyfile} ubuntu@{ip} "{cmd}"'
         run = to_run.format(keyfile=self.cfg['key_file'], ip=ip, cmd=cmd)
         print(run)
         os.system(run)
@@ -108,8 +108,8 @@ class EC2:
             client.terminate_instances(InstanceIds=ids)
 
 
-cfg = {'region': 'us-west-2',# 'availability_zone': 'us-west-2c',
-       'ami': 'ami-ceb545b6',
+cfg = {'region': 'us-west-2',
+       'ami': 'ami-e4813c9c',  # amazon's deep learning AMI + bazel
        #  'security_groups': ['sg-2d241757',  # Jupyter notebooks
                            #  'sg-f2937f8f',  # jupyter + ssh + ports{3141,6282}
                            #  'sg-491aa934',  # MPI1
@@ -149,19 +149,19 @@ if __name__ == "__main__":
     elif command == 'setup':
         cloud.write_public_dnss('DNSs')
         cloud.write_private_ips('hosts')
-        cloud.scp_up()
-        cloud.run_cluster_ssh_command('pip install --upgrade distributed')
-        cloud.run_cluster_ssh_command('conda install -y -c anaconda python-blosc')
-        cloud.run_cluster_ssh_command('conda install -y pytorch torchvision -c pytorch')
+        cloud.scp_up(files='../terngrad', out='terngrad', flags='-r')
+        os.system('cp hosts setup_scripts/hosts')
         cloud.scp_up(files='./setup_scripts/', out='', flags='-r')
-        cloud.run_cluster_ssh_command('cd setup_scripts; bash main.sh')
-        cloud.run_cluster_ssh_command('ssh-keyscan -f ~/WideResNet-pytorch/hosts >> ~/.ssh/known_hosts')
+        #  cloud.scp_up(files='
+        cloud.run_cluster_ssh_command('cd setup_scripts; bash passwordless_ssh.sh >> ~/install.txt')
+        cloud.run_cluster_ssh_command('ssh-keyscan -f ~/setup_scripts/hosts >> ~/.ssh/known_hosts')
     elif command == 'ssh_setup':
-        cloud.run_cluster_ssh_command('cd setup_scripts; bash main.sh')
-        cloud.run_cluster_ssh_command('ssh-keyscan -f ~/WideResNet-pytorch/hosts >> ~/.ssh/known_hosts')
+        os.system('cp hosts setup_scripts/hosts')
+        cloud.run_cluster_ssh_command('cd setup_scripts; sh passwordless_ssh.sh')
+        cloud.run_cluster_ssh_command('ssh-keyscan -f ~/setup_scripts/hosts >> ~/.ssh/known_hosts')
     elif command in {'scp', 'scp_up'}:
         cloud.scp_up()
-        cloud.run_cluster_ssh_command('mkdir /home/ec2-user/WideResNet-pytorch/pytorch_ps_mpi')
+        cloud.run_cluster_ssh_command('mkdir /home/ubuntu/WideResNet-pytorch/pytorch_ps_mpi')
         cloud.scp_up(files='../WideResNet-pytorch/pytorch_ps_mpi/*.py',
                      out='WideResNet-pytorch/pytorch_ps_mpi/')
     elif command == 'debug':
