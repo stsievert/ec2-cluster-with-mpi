@@ -53,21 +53,24 @@ class EC2:
         self.wait_until_initialized()
         return r
 
-    def write_public_dnss(self, filename):
-        instances = self._get_cluster()
+    def write_public_dnss(self, filename, instances=None):
+        if instances is None:
+            instances = self._get_cluster()
         DNSs = [instance.public_dns_name for instance in instances]
         with open(filename, 'w') as f:
             print('\n'.join(DNSs), file=f)
 
-    def write_private_ips(self, filename):
-        instances = self._get_cluster()
+    def write_private_ips(self, filename, instances=None):
+        if instances is None:
+            instances = self._get_cluster()
         ips = [instance.private_ip_address for instance in instances]
         with open(filename, 'w') as f:
             print('\n'.join(ips), file=f)
 
-    def scp_up(self, files='../WideResNet-pytorch/* hosts',
+    def scp_up(self, instances=None, files='../WideResNet-pytorch/* hosts',
                out='WideResNet-pytorch', flags=''):
-        instances = self._get_cluster()
+        if instances is None:
+            instances = self._get_cluster()
         ips = [instance.classic_address.public_ip for instance in instances]
         cmd = ('scp -o StrictHostKeyChecking=no -i {key} {flags} {files} '
                'ec2-user@{ip}:~/{out}')
@@ -76,8 +79,9 @@ class EC2:
                   for ip in ips]
         Parallel(n_jobs=len(cmds))(delayed(os.system)(run) for run in cmds)
 
-    def run_cluster_ssh_command(self, cmd):
-        instances = self._get_cluster()
+    def run_cluster_ssh_command(self, cmd, instances=None):
+        if instances is None:
+            instances = self._get_cluster()
         ips = [instance.classic_address.public_ip for instance in instances]
         to_run = 'ssh -i {keyfile} ec2-user@{ip} "{cmd}"'
 
@@ -107,6 +111,28 @@ class EC2:
                   (" ".join([str(x) for x in ids])))
             client.terminate_instances(InstanceIds=ids)
 
+    def _tag_instances(self, instances=None, **kwargs):
+        if instances is None:
+            instances = self._get_cluster()
+        for instance in instances:
+            instance.create_tags(Tags=kwargs)
+
+    def seperate_cluster(self, size=2):
+        if not isinstance(size, int):
+            size = int(size)
+        instances = self._get_cluster()
+        groups = list(chunks(list(instances), size))
+        for i, group in enumerate(groups):
+            #  self._tag_instances(instances=group, cluster_idx=str(i))
+            self.write_private_ips(f'hosts{i}', instances=group)
+            self.scp_up(files=f'./hosts{i}/', instances=group)
+            print(i, group[0].public_dns_name)
+
+
+def chunks(l, n):
+    """Yield successive n-sized chunks from l."""
+    for i in range(0, len(l), n):
+        yield l[i:i + n]
 
 cfg = {'region': 'us-west-2',# 'availability_zone': 'us-west-2c',
        'ami': 'ami-ceb545b6',
@@ -118,14 +144,14 @@ cfg = {'region': 'us-west-2',# 'availability_zone': 'us-west-2c',
                            'jupyter+ssh+ports{3141,6282}',
                            'MPI1',
                            'MPI2'],
-       #  'instance_type': 'spot-instance',
-       #  'spot_price': '1.50',  # must be a str
-       'instance_type': 'dedicated',
+       'instance_type': 'spot-instance',
+       'spot_price': '1.00',  # must be a str
+       #  'instance_type': 'dedicated',
        'key_name': 'scott-key-dim',
        'key_file': '/Users/scott/Developer/AWS/scott-key-dim.pem',
-       'cluster': {'count': 2, 'instance_type': 'g2.2xlarge',
+       'cluster': {'count': 16, 'instance_type': 'p2.xlarge',
                    'name': 'scott-compress',
-                   #  'block-duration-minutes': 360},
+                   'block-duration-minutes': 360,
                    }
        }
 
@@ -134,6 +160,7 @@ ec2 = boto3.resource("ec2", region_name=cfg['region'])
 
 if __name__ == "__main__":
     # python launch.py --seed=42 --layers=62 --compress=1
+    # cluster launched at 10:30 on 2018-02-03
     cloud = EC2(cfg)
     if len(sys.argv) < 2:
         print('Usage: python {} command [custom_cluster_command]'.format(sys.argv[0]))
@@ -147,12 +174,14 @@ if __name__ == "__main__":
         cloud.write_public_dnss('DNSs')
         cloud.write_private_ips('hosts')
     elif command == 'setup':
+        instances = [x.id for x in cloud._get_cluster()]
+        print('About to setup...\n', instances)
         cloud.write_public_dnss('DNSs')
         cloud.write_private_ips('hosts')
         cloud.scp_up()
         cloud.run_cluster_ssh_command('pip install --upgrade distributed')
         cloud.run_cluster_ssh_command('conda install -y -c anaconda python-blosc')
-        cloud.run_cluster_ssh_command('conda install -y pytorch torchvision -c pytorch')
+        cloud.run_cluster_ssh_command('conda install -y pytorch==0.3.0 torchvision -c pytorch')
         cloud.scp_up(files='./setup_scripts/', out='', flags='-r')
         cloud.run_cluster_ssh_command('cd setup_scripts; bash main.sh')
         cloud.run_cluster_ssh_command('ssh-keyscan -f ~/WideResNet-pytorch/hosts >> ~/.ssh/known_hosts')
@@ -164,6 +193,9 @@ if __name__ == "__main__":
         cloud.run_cluster_ssh_command('mkdir /home/ec2-user/WideResNet-pytorch/pytorch_ps_mpi')
         cloud.scp_up(files='../WideResNet-pytorch/pytorch_ps_mpi/*.py',
                      out='WideResNet-pytorch/pytorch_ps_mpi/')
+        cloud.run_cluster_ssh_command('mkdir /home/ec2-user/WideResNet-pytorch/codings')
+        cloud.scp_up(files='../WideResNet-pytorch/codings/*.py',
+                     out='WideResNet-pytorch/codings/')
     elif command == 'debug':
         cloud.run_cluster_ssh_command('killall python')
         cloud.scp_up()
@@ -193,5 +225,10 @@ if __name__ == "__main__":
         cloud.run_cluster_ssh_command('sudo rm -rf ~/output/*')
         cloud.run_cluster_ssh_command('sudo rm -rf ~/WideResNet-pytorch/output/*')
     else:
-        raise ValueError('Usage: python launch.py [command].\n'
-                         '`command` not recognized.')
+        if command not in dir(cloud):
+            raise ValueError('Usage: python launch.py [command].\n'
+                             '`command` not recognized.')
+        kwargs = filter(lambda x: '--' in x, sys.argv[2:])
+        kwargs = map(lambda x: x.replace('--', ''), kwargs)
+        kwargs = {s[:s.find('=')]: s[s.find('=') + 1:] for s in kwargs}
+        getattr(cloud, command)(**kwargs)
