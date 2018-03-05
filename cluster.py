@@ -118,6 +118,10 @@ class EC2:
             instance.create_tags(Tags=kwargs)
 
     def seperate_cluster(self, size=2):
+        """
+        size : int
+            How large each cluster is. size=2 with 16 machines corresponds to 8 groups of two machines each.
+        """
         if not isinstance(size, int):
             size = int(size)
         instances = self._get_cluster()
